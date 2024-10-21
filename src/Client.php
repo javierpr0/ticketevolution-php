@@ -7,7 +7,7 @@ use GuzzleHttp\Command\Guzzle\Description;
 use GuzzleHttp\Command\Guzzle\GuzzleClient;
 use GuzzleHttp\HandlerStack;
 use Symfony\Component\Config\FileLocator;
-use function GuzzleHttp\default_user_agent;
+use GuzzleHttp\Utils;
 
 class Client
 {
@@ -16,7 +16,7 @@ class Client
      *
      * @const string
      */
-    const VERSION = '4.4.4';
+    public const VERSION = '4.4.4';
 
     /**
      * Guzzle service description
@@ -76,7 +76,7 @@ class Client
         // Set a custom User Agent indicating which version of this library we are using
         // if one isn't already provided
         if (!isset($options['headers']['User-Agent'])) {
-            $this->settings['headers']['User-Agent'] = 'ticketevolution-php/' . self::VERSION . ' ' . default_user_agent();
+            $this->settings['headers']['User-Agent'] = 'ticketevolution-php/' . self::VERSION . ' ' . Utils::defaultUserAgent();
         }
 
     }

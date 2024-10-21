@@ -4,6 +4,8 @@ namespace TicketEvolution;
 
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
+use GuzzleHttp\Psr7\Query;
+use GuzzleHttp\Psr7\Uri;
 
 class TEvoAuthMiddleware
 {
@@ -17,7 +19,6 @@ class TEvoAuthMiddleware
      */
     protected $apiSecret;
 
-
     /**
      * @param string $apiToken
      * @param string $apiSecret
@@ -27,7 +28,6 @@ class TEvoAuthMiddleware
         $this->apiToken = $apiToken;
         $this->apiSecret = $apiSecret;
     }
-
 
     /**
      * Called when the middleware is handled.
@@ -39,7 +39,6 @@ class TEvoAuthMiddleware
     public function __invoke(callable $handler)
     {
         return function ($request, array $options) use ($handler) {
-
             $request = $this->signRequest($request);
 
             $promise = function (ResponseInterface $response) use ($request) {
@@ -49,7 +48,6 @@ class TEvoAuthMiddleware
             return $handler($request, $options)->then($promise);
         };
     }
-
 
     /**
      * Signs the request with the appropriate headers.
@@ -62,11 +60,8 @@ class TEvoAuthMiddleware
     {
         $request = $this->getRequestWithSortedParameters($request);
         $request = $this->getRequestWithXToken($request);
-        $request = $this->getRequestWithXSignature($request);
-
-        return $request;
+        return $this->getRequestWithXSignature($request);
     }
-
 
     /**
      * Signs the request with the appropriate headers.
@@ -79,20 +74,11 @@ class TEvoAuthMiddleware
     {
         $sortedParams = $this->prepareParameters($this->getParametersFromRequest($request));
 
-        // Re-Set the query to the properly ordered query string
-        if (method_exists('\GuzzleHttp\Psr7\Query','build')) {
-            // GuzzleHttp\Psr7 version 2+
-            $query = \GuzzleHttp\Psr7\Query::build($sortedParams, PHP_QUERY_RFC1738);
-        } else {
-            // GuzzleHttp\Psr7 version 1
-            $query = \GuzzleHttp\Psr7\build_query($sortedParams, PHP_QUERY_RFC1738);
-        }
+        // Use Query::build for the modern version of Guzzle
+        $query = Query::build($sortedParams, PHP_QUERY_RFC1738);
         $uri = $request->getUri()->withQuery($query);
-        $request = $request->withUri($uri);
-
-        return $request;
+        return $request->withUri($uri);
     }
-
 
     /**
      * Adds the X-Token header to the request.
@@ -103,11 +89,8 @@ class TEvoAuthMiddleware
      */
     public function getRequestWithXToken(RequestInterface $request): RequestInterface
     {
-        $request = $request->withHeader('X-Token', $this->apiToken);
-
-        return $request;
+        return $request->withHeader('X-Token', $this->apiToken);
     }
-
 
     /**
      * Signs the request with the X-Signature header.
@@ -118,11 +101,8 @@ class TEvoAuthMiddleware
      */
     public function getRequestWithXSignature(RequestInterface $request): RequestInterface
     {
-        $request = $request->withHeader('X-Signature', $this->getSignature($request));
-
-        return $request;
+        return $request->withHeader('X-Signature', $this->getSignature($request));
     }
-
 
     /**
      * Calculate signature for request
@@ -136,9 +116,7 @@ class TEvoAuthMiddleware
         $stringToSign = $this->getStringToSign($request);
 
         return base64_encode($this->signHmacSha256($stringToSign));
-
     }
-
 
     /**
      * Calculate signature for request
@@ -150,20 +128,17 @@ class TEvoAuthMiddleware
     public function getStringToSign(RequestInterface $request): string
     {
         // For POST|PUT set the JSON body string as the params
-        if ($request->getMethod() == 'POST' || $request->getMethod() == 'PUT' || $request->getMethod() == 'PATCH') {
+        if (in_array($request->getMethod(), ['POST', 'PUT', 'PATCH'])) {
             $data = $request->getBody()->__toString();
         } else {
             $data = $this->getParametersFromRequest($request);
         }
 
-        $baseString = $this->createBaseString(
-            $request,
-            $data
+        return $this->createBaseString(
+                $request,
+                $data
         );
-
-        return $baseString;
     }
-
 
     /**
      * Creates the Signature Base String.
@@ -173,14 +148,15 @@ class TEvoAuthMiddleware
      * input in hashing or signing algorithms.
      *
      * @param RequestInterface $request Request being signed
-     * @param array|string     $data    HTTP Request parameters
+     * @param array|string    $data    HTTP Request parameters
      *
      * @return string Returns the base string
      */
     protected function createBaseString(RequestInterface $request, $data = []): string
     {
-        // Remove query params from URL.
-        $url = preg_replace('/https:\/\/|\?.*/', '', $request->getUri());
+        // Use Uri for safer URL manipulation
+        $uri = new Uri((string) $request->getUri());
+        $url = preg_replace('/https:\/\/|\?.*/', '', (string) $uri);
 
         if (is_array($data)) {
             $query = http_build_query($data, '', '&', PHP_QUERY_RFC1738);
@@ -189,10 +165,9 @@ class TEvoAuthMiddleware
         }
 
         return strtoupper($request->getMethod())
-            . ' ' . $url
-            . '?' . $query;
+                . ' ' . $url
+                . '?' . $query;
     }
-
 
     /**
      * Sorts the array and removes null parameters
@@ -207,15 +182,10 @@ class TEvoAuthMiddleware
         uksort($params, 'strcmp');
 
         // Unset any parameters with null values
-        foreach ($params as $key => $value) {
-            if ($value === null) {
-                unset($params[$key]);
-            }
-        }
-
-        return $params;
+        return array_filter($params, static function ($value) {
+            return $value !== null;
+        });
     }
-
 
     /**
      * Perform the HMAC SHA256 signing using the $apiSecret
@@ -229,7 +199,6 @@ class TEvoAuthMiddleware
         return hash_hmac('sha256', $baseString, $this->apiSecret, true);
     }
 
-
     /**
      * @param RequestInterface $request
      *
@@ -238,14 +207,7 @@ class TEvoAuthMiddleware
     protected function getParametersFromRequest(RequestInterface $request): array
     {
         $uri = $request->getUri();
-        if (method_exists('\GuzzleHttp\Psr7\Query','parse')) {
-            // GuzzleHttp\Psr7 version 2+
-            $params = \GuzzleHttp\Psr7\Query::parse($uri->getQuery(), PHP_QUERY_RFC1738);
-        } else {
-            // GuzzleHttp\Psr7 version 1
-            $params = \GuzzleHttp\Psr7\parse_query($uri->getQuery(), PHP_QUERY_RFC1738);
-        }
-
-        return $params;
+        // Use Query::parse for the modern version of Guzzle
+        return Query::parse($uri->getQuery(), PHP_QUERY_RFC1738);
     }
 }
